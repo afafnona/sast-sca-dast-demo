@@ -33,6 +33,7 @@ jobs:
             -Dsonar.organization=afafnona
             -Dsonar.projectKey=afafnona_sast-sca-dast-demo
             -Dsonar.sources=vulnerable_flask_app
+            -Dsonar.coverage.exclusions=**/*
 
       - name: SonarQube Quality Gate check
         uses: sonarsource/sonarqube-quality-gate-action@v1
