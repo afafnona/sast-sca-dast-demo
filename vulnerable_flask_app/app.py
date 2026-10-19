@@ -1,52 +1,37 @@
+import os, subprocess
 from flask import Flask, request
-import subprocess
+from markupsafe import escape
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = "verysecretkey123" # Hardcoded secret!
+# Secret comes from the environment, never hardcoded
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(24).hex()
 
-@app.route('/')
-def index():
-    return """
-    <h1>Welcome to our vulnerable Flask App! 😎</h1>
-    <p>Explore the different pages:</p>
-    <ul>
-        <li><a href="/hello?name=World">Hello Page (try changing the name in the URL!)</a></li>
-        <li><a href="/execute?cmd=ls -la">Execute Command Page (try changing the command in the URL!)</a></li>
-        <li><a href="/admin">Admin Area (contains a secret!)</a></li>
-    </ul>
-    
-    <a href="https://github.com/pandelig/sast-sca-dast-demo" target="_blank">GitHub Repo↗</a></li>
-    """
+ALLOWED = {"ls": ["ls", "-l"], "date": ["date"], "whoami": ["whoami"]}
 
 @app.route('/hello')
 def hello():
-    name = request.args.get('name', 'Guest')
-    return f"""
-    <h1>Hello Page</h1>
-    <p>Hello, {name}!</p>
-    <p><a href="/">Back to Homepage</a></p>
-    """
+    name = escape(request.args.get('name', 'Guest'))   # fixes XSS
+    return f"<h1>Hello Page</h1><p>Hello, {name}!</p><p><a href='/'>Back</a></p>"
 
 @app.route('/execute')
 def execute():
-    command = request.args.get('cmd', 'ls -l')
-    # Insecure command execution!
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    return f"""
-    <h1>Execute Command Page</h1>
-    <p>Executing command: <code>{command}</code></p>
-    <pre>{result.stdout}</pre>
-    <pre style="color: red;">{result.stderr}</pre>
-    <p><a href="/">Back to Homepage</a></p>
-    """
+    key = request.args.get('cmd', 'ls')
+    if key not in ALLOWED:                              # fixes command injection
+        return "Command not allowed", 400
+    result = subprocess.run(ALLOWED[key], capture_output=True, text=True)
+    return f"<h1>Execute</h1><pre>{escape(result.stdout)}</pre><p><a href='/'>Back</a></p>"
 
 @app.route('/admin')
 def admin():
-    return f"""
-    <h1>Admin Area</h1>
-    <p>Admin area - Secret Key: {app.config['SECRET_KEY']}</p>
-    <p><a href="/">Back to Homepage</a></p>
-    """
+    return "<h1>Admin Area</h1><p><a href='/'>Back</a></p>"   # no secret displayed
+
+@app.after_request
+def security_headers(resp):                             # clears most ZAP Medium/Low alerts
+    resp.headers['Content-Security-Policy'] = "default-src 'self'"
+    resp.headers['X-Frame-Options'] = 'DENY'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Permissions-Policy'] = 'geolocation=()'
+    return resp
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')
+    app.run(debug=False, host=os.environ.get('HOST', '127.0.0.1'))
