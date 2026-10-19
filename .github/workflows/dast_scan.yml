@@ -1,0 +1,47 @@
+name: DAST Scan
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  dast_checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Docker Network
+        run: docker network create zap-network
+
+      - name: Build Flask Docker image
+        run: docker build -t my-vulnerable-flask-app ./vulnerable_flask_app
+
+      - name: Run Flask Docker container
+        run: docker run -d --name flask-app-container --network zap-network my-vulnerable-flask-app
+
+      - name: Wait for app to start
+        run: sleep 10
+
+      - name: Create ZAP reports directory
+        run: mkdir ${{ github.workspace }}/zap_reports
+
+      - name: Set ZAP reports directory permissions
+        run: chmod 777 ${{ github.workspace }}/zap_reports
+
+      - name: Run OWASP ZAP Full Scan
+        run: |
+          docker run -t --network zap-network \
+            -v ${{ github.workspace }}/zap_reports:/zap/wrk:rw \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-full-scan.py -t http://flask-app-container:5000 \
+            -r report.html -I
+
+      - name: Upload ZAP reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-reports
+          path: ${{ github.workspace }}/zap_reports/
+          retention-days: 5
